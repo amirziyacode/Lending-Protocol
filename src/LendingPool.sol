@@ -1,9 +1,142 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity 0.8.30;
 
+import {IERC20} from "openzeppelin-contracts/contracts/interfaces/IERC20.sol";
+import {ReceiptToken} from "src/ReceiptToken.sol";
+import {PriceOracle} from "src/PriceOracle.sol";
+import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+
 /**
  * @title LendingProtocol
  * @author AmirAli
  * @notice it just for learing !!
  */
-contract LendingPool {}
+contract LendingPool {
+    using SafeERC20 for IERC20;
+    // ==================== Erros ====================
+    error LendingPool__ZeroAmount();
+    error LendingPool__HeathFactorNotOk();
+    error LendingPool__InsufficientCollateral();
+    error LendingPool__OutOf_MaxBorrow();
+    error LendingPool__InsufficientLiquidity();
+
+    // ==================== Type Declarations ====================
+    struct UserPosition {
+        uint256 deposited;
+        uint256 borrowed;
+        uint256 lastInterestUpdate;
+    }
+
+    // ==================== State Variables ====================
+    IERC20 private token;
+    ReceiptToken private receiptToken;
+    PriceOracle private oracle;
+
+    mapping(address => UserPosition) private positions;
+
+    uint256 public totalDeposits;
+
+    uint256 public totalBorrows;
+
+    uint256 private constant MINIMUM_HEALTH_FACTOR = 1e18;
+
+    uint256 private constant LTV = 80; // LTV = 80 %
+
+    // ==================== Event ====================
+
+    event Deposited(address indexed sender, uint256 amount);
+    event Withdrawn(address indexed sender, uint256 amount);
+    event Borrow(address indexed sender, uint256 amount);
+
+    // ==================== External Functions ====================
+
+    /**
+     *
+     * @param price_feed is for network we want to get ETH price from offchain like sepolia
+     */
+    constructor(address price_feed) {
+        receiptToken = new ReceiptToken();
+        oracle = new PriceOracle(price_feed);
+    }
+
+    /**
+     *
+     * @param amount ETH value send it
+     */
+    function depositCollateral(uint256 amount) external {
+        if (amount == 0) {
+            revert LendingPool__ZeroAmount();
+        }
+
+        token.safeTransferFrom(msg.sender, address(this), amount);
+
+        positions[msg.sender].deposited += amount;
+        totalDeposits += amount;
+
+        receiptToken.mint(msg.sender, amount);
+
+        emit Deposited(msg.sender, amount);
+    }
+
+    function borrow(uint256 amount) external {
+        if (amount == 0) {
+            revert LendingPool__ZeroAmount();
+        }
+
+        if (!isBorrowAllowed(msg.sender, amount)) {
+            revert LendingPool__OutOf_MaxBorrow();
+        }
+
+        if (token.balanceOf(address(this)) < amount) {
+            revert LendingPool__InsufficientLiquidity();
+        }
+
+        positions[msg.sender].borrowed += amount;
+
+        if (_healthFactor(msg.sender) < 1) {
+            revert LendingPool__HeathFactorNotOk();
+        }
+
+        token.safeTransfer(msg.sender, amount);
+
+        emit Borrow(msg.sender, amount);
+    }
+
+    function Withdraw(uint256 amount) external {
+        if (amount == 0) {
+            revert LendingPool__ZeroAmount();
+        }
+
+        if (amount < positions[msg.sender].deposited) {
+            revert LendingPool__InsufficientCollateral();
+        }
+
+        positions[msg.sender].deposited -= amount;
+
+        if (_healthFactor(msg.sender) < MINIMUM_HEALTH_FACTOR) {
+            revert LendingPool__HeathFactorNotOk();
+        }
+
+        totalDeposits -= amount;
+
+        receiptToken.burn(msg.sender, amount);
+
+        token.safeTransfer(msg.sender, amount);
+
+        emit Withdrawn(msg.sender, amount);
+    }
+
+    // ==================== Internal Functions ====================
+    function _healthFactor(address _user) internal view returns (uint256) {
+        return 1;
+    }
+
+    function isBorrowAllowed(address user, uint256 borrowAmount) internal view returns (bool) {
+        uint256 currentDebt = positions[user].borrowed;
+        uint256 borrowLimit = (positions[user].deposited * LTV) / 100;
+
+        return (currentDebt + borrowAmount) <= borrowLimit;
+    }
+
+    // ==================== Getter Functions ====================
+}

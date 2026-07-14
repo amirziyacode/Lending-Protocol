@@ -1,7 +1,13 @@
 {
     "wake.compiler.solc.remappings": [
+        "@chainlink/contracts-ccip/=lib/chainlink-local/lib/ccip/contracts/",
+        "@chainlink/contracts/=lib/chainlink-local/lib/chainlink-brownie-contracts/contracts/",
+        "@chainlink/local/src/=lib/chainlink-local/src/",
         "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+        "chainlink-local/=lib/chainlink-local/src/",
+        "erc4626-tests/=lib/openzeppelin-contracts/lib/erc4626-tests/",
         "forge-std/=lib/forge-std/src/",
+        "halmos-cheatcodes/=lib/openzeppelin-contracts/lib/halmos-cheatcodes/src/",
         "openzeppelin-contracts/=lib/openzeppelin-contracts/"
     ]
 }
