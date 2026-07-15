@@ -10,7 +10,7 @@ import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
  */
 contract ReceiptToken is ERC20 {
     // ==================== error ====================
-    error ReceiptToken__NotPoolOwner();
+    error ReceiptToken__NotOwner();
 
     // ==================== State Variables ====================
     address public pool;
@@ -18,7 +18,7 @@ contract ReceiptToken is ERC20 {
     // ==================== Modifier ====================
     modifier onlyPool() {
         if (msg.sender != pool) {
-            revert ReceiptToken__NotPoolOwner();
+            revert ReceiptToken__NotOwner();
         }
         _;
     }

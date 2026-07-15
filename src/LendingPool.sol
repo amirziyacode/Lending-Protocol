@@ -19,6 +19,7 @@ contract LendingPool {
     error LendingPool__InsufficientCollateral();
     error LendingPool__OutOf_MaxBorrow();
     error LendingPool__InsufficientLiquidity();
+    error LendingPool__RepayTooMuch();
 
     // ==================== Type Declarations ====================
     struct UserPosition {
@@ -40,6 +41,8 @@ contract LendingPool {
 
     uint256 private constant MINIMUM_HEALTH_FACTOR = 1e18;
 
+    uint256 constant PRECISION = 1e18;
+
     uint256 private constant LTV = 80; // LTV = 80 %
 
     // ==================== Event ====================
@@ -47,6 +50,7 @@ contract LendingPool {
     event Deposited(address indexed sender, uint256 amount);
     event Withdrawn(address indexed sender, uint256 amount);
     event Borrow(address indexed sender, uint256 amount);
+    event Repay(address indexed sender, uint256 amount);
 
     // ==================== External Functions ====================
 
@@ -93,13 +97,29 @@ contract LendingPool {
 
         positions[msg.sender].borrowed += amount;
 
-        if (_healthFactor(msg.sender) < 1) {
+        if (_healthFactor(msg.sender) < MINIMUM_HEALTH_FACTOR) {
             revert LendingPool__HeathFactorNotOk();
         }
 
         token.safeTransfer(msg.sender, amount);
 
         emit Borrow(msg.sender, amount);
+    }
+
+    function repay(uint256 amount) external {
+        if (amount == 0) {
+            revert LendingPool__ZeroAmount();
+        }
+
+        if (amount > positions[msg.sender].borrowed) {
+            revert LendingPool__RepayTooMuch();
+        }
+
+        token.safeTransferFrom(msg.sender, address(this), amount);
+
+        positions[msg.sender].borrowed -= amount;
+
+        emit Repay(msg.sender, amount);
     }
 
     function Withdraw(uint256 amount) external {
@@ -128,7 +148,14 @@ contract LendingPool {
 
     // ==================== Internal Functions ====================
     function _healthFactor(address _user) internal view returns (uint256) {
-        return 1;
+        uint256 collateral = positions[_user].deposited;
+        uint256 debt = positions[_user].borrowed;
+
+        if (debt == 0) {
+            return type(uint256).max;
+        }
+
+        return (collateral * PRECISION) / debt;     
     }
 
     function isBorrowAllowed(address user, uint256 borrowAmount) internal view returns (bool) {
