@@ -120,22 +120,76 @@ contract LendingPoolTest is Test {
         pool.borrow(0);
     }
 
-    function testBorrow_revert_NotDepositCollateral() public {
+    function testBorrow_revert_MaxBorrow() public {
+        vm.startPrank(user);
+        uint256 amount = 700;
+        mockToken.approve(address(pool), amount);
+
+        pool.depositCollateral(amount);
+
+        vm.stopPrank();
+
         vm.expectRevert(LendingPool.LendingPool__OutOf_MaxBorrow.selector);
+        uint256 borrowAmount = 600;
         vm.prank(user);
-        pool.borrow(0);
+        pool.borrow(borrowAmount);
     }
 
-    function testBorrow_revert_MaxBorrow() public deposit {
-        vm.prank(user);
-        pool.borrow(200);
-
-        vm.prank(user);
-        pool.borrow(200);
-
-        vm.expectRevert(LendingPool.LendingPool__OutOf_MaxBorrow.selector);
-
+    function testBorrow_revert_InsufficientLiquidity() public {
+        vm.expectRevert(LendingPool.LendingPool__InsufficientLiquidity.selector);
         vm.prank(user);
         pool.borrow(300);
+    }
+
+    function testBorrow_revert_NotOkhealthFactor() public deposit {
+        uint256 borrowAmount = 400;
+
+        vm.expectRevert(LendingPool.LendingPool__HeathFactorNotOk.selector);
+        vm.prank(user);
+        pool.borrow(borrowAmount);
+    }
+
+    function testBorrow() public deposit {
+        uint256 borrowAmount = 300;
+        uint256 balancePoolBefore = mockToken.balanceOf(address(pool)); // 500 token
+        uint256 balanceUserBefore = mockToken.balanceOf(user); // 500 token
+
+        vm.expectEmit(true, false, false, true);
+        emit LendingPool.Borrow(user, borrowAmount);
+        vm.prank(user);
+        pool.borrow(borrowAmount);
+
+        uint256 getBorrowed = pool.getUserBorrowed(user);
+        uint256 balancePoolAfter = mockToken.balanceOf(address(pool)); // 200 token
+        uint256 balanceUserAfter = mockToken.balanceOf(user); // 800 token
+
+        assertEq(getBorrowed, borrowAmount);
+        assertEq(balancePoolAfter, balancePoolBefore - borrowAmount);
+        assertEq(balanceUserAfter, balanceUserBefore + borrowAmount);
+    }
+
+    /**
+     * 
+     * @param borrowAmount value to borrowed
+     * @notice maxBorrowed is limited from healthFacotr
+     */
+    function testFuzz_Borrow_withAnyAmount(uint256 borrowAmount) public deposit {
+        uint256 maxBorrowed = 375;
+        vm.assume(borrowAmount > 0 && borrowAmount < maxBorrowed);
+        uint256 balancePoolBefore = mockToken.balanceOf(address(pool)); // 500 token
+        uint256 balanceUserBefore = mockToken.balanceOf(user); // 500 token
+
+        vm.expectEmit(true, false, false, true);
+        emit LendingPool.Borrow(user, borrowAmount);
+        vm.prank(user);
+        pool.borrow(borrowAmount);
+
+        uint256 getBorrowed = pool.getUserBorrowed(user);
+        uint256 balancePoolAfter = mockToken.balanceOf(address(pool)); // 200 token
+        uint256 balanceUserAfter = mockToken.balanceOf(user); // 800 token
+
+        assertEq(getBorrowed, borrowAmount);
+        assertEq(balancePoolAfter, balancePoolBefore - borrowAmount);
+        assertEq(balanceUserAfter, balanceUserBefore + borrowAmount);
     }
 }

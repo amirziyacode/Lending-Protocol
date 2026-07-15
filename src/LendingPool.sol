@@ -45,6 +45,8 @@ contract LendingPool {
 
     uint256 private constant LTV = 80; // LTV = 80 %
 
+    uint256 private constant LIQUIDATION_THRESHOLD = 75; // 75 %
+
     // ==================== Event ====================
 
     event Deposited(address indexed sender, uint256 amount);
@@ -88,12 +90,12 @@ contract LendingPool {
             revert LendingPool__ZeroAmount();
         }
 
-        if (!_isBorrowAllowed(msg.sender, amount)) {
-            revert LendingPool__OutOf_MaxBorrow();
-        }
-
         if (token.balanceOf(address(this)) < amount) {
             revert LendingPool__InsufficientLiquidity();
+        }
+
+        if (!_isBorrowAllowed(msg.sender, amount)) {
+            revert LendingPool__OutOf_MaxBorrow();
         }
 
         positions[msg.sender].borrowed += amount;
@@ -156,7 +158,9 @@ contract LendingPool {
             return type(uint256).max;
         }
 
-        return (collateral * PRECISION) / debt;
+        uint256 adjustedCollateral = (collateral * LIQUIDATION_THRESHOLD) / 100;
+
+        return (adjustedCollateral * PRECISION) / debt;
     }
 
     function _isBorrowAllowed(address user, uint256 borrowAmount) internal view returns (bool) {
