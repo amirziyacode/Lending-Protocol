@@ -155,7 +155,7 @@ contract LendingPool {
             return type(uint256).max;
         }
 
-        return (collateral * PRECISION) / debt;     
+        return (collateral * PRECISION) / debt;
     }
 
     function isBorrowAllowed(address user, uint256 borrowAmount) internal view returns (bool) {
