@@ -46,7 +46,7 @@ contract ReceiptTokenTest is Test {
 
         token.mint(user, TOTALSUPPLY);
 
-        token.burn(user,100);
+        token.burn(user, 100);
 
         uint256 excpectBalance = 900;
 
@@ -61,6 +61,6 @@ contract ReceiptTokenTest is Test {
         vm.expectRevert(ReceiptToken.ReceiptToken__NotOwner.selector);
 
         vm.prank(user);
-        token.burn(user,100);
+        token.burn(user, 100);
     }
 }

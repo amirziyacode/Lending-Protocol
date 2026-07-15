@@ -29,8 +29,8 @@ contract LendingPool {
     }
 
     // ==================== State Variables ====================
-    IERC20 private token;
-    ReceiptToken private receiptToken;
+    IERC20 public token;
+    ReceiptToken public receiptToken;
     PriceOracle private oracle;
 
     mapping(address => UserPosition) private positions;
@@ -58,7 +58,8 @@ contract LendingPool {
      *
      * @param price_feed is for network we want to get ETH price from offchain like sepolia
      */
-    constructor(address price_feed) {
+    constructor(address _token, address price_feed) {
+        token = IERC20(_token);
         receiptToken = new ReceiptToken();
         oracle = new PriceOracle(price_feed);
     }
@@ -87,7 +88,7 @@ contract LendingPool {
             revert LendingPool__ZeroAmount();
         }
 
-        if (!isBorrowAllowed(msg.sender, amount)) {
+        if (!_isBorrowAllowed(msg.sender, amount)) {
             revert LendingPool__OutOf_MaxBorrow();
         }
 
@@ -158,7 +159,7 @@ contract LendingPool {
         return (collateral * PRECISION) / debt;
     }
 
-    function isBorrowAllowed(address user, uint256 borrowAmount) internal view returns (bool) {
+    function _isBorrowAllowed(address user, uint256 borrowAmount) internal view returns (bool) {
         uint256 currentDebt = positions[user].borrowed;
         uint256 borrowLimit = (positions[user].deposited * LTV) / 100;
 
@@ -166,4 +167,20 @@ contract LendingPool {
     }
 
     // ==================== Getter Functions ====================
+
+    function getUserDeposite(address user) external view returns (uint256) {
+        return positions[user].deposited;
+    }
+
+    function getUserBorrowed(address user) external view returns (uint256) {
+        return positions[user].borrowed;
+    }
+
+    function getTotalDeposits() external view returns (uint256) {
+        return totalDeposits;
+    }
+
+    function getLTV() external pure returns (uint256) {
+        return LTV;
+    }
 }
