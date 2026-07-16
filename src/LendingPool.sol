@@ -125,12 +125,12 @@ contract LendingPool {
         emit Repay(msg.sender, amount);
     }
 
-    function Withdraw(uint256 amount) external {
+    function withdraw(uint256 amount) external {
         if (amount == 0) {
             revert LendingPool__ZeroAmount();
         }
 
-        if (amount < positions[msg.sender].deposited) {
+        if (amount > positions[msg.sender].deposited) {
             revert LendingPool__InsufficientCollateral();
         }
 
@@ -186,5 +186,9 @@ contract LendingPool {
 
     function getLTV() external pure returns (uint256) {
         return LTV;
+    }
+
+    function getHealthFactor(address _user) external view returns (uint256) {
+        return _healthFactor(_user);
     }
 }
