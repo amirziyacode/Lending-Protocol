@@ -378,7 +378,7 @@ contract LendingPoolTest is Test {
         vm.warp(300 days);
 
         uint256 interestAmount = 12;
-        uint256 accruedInterestABefore = getAccrueInterest(user);
+        uint256 accruedInterestABefore = getAccrueBorrowInterest(user);
 
         // repay interestAmount
         vm.startPrank(user);
@@ -406,7 +406,7 @@ contract LendingPoolTest is Test {
         vm.warp(300 days);
 
         uint256 repayAmount = 10;
-        uint256 accruedInterestABefore = getAccrueInterest(user);
+        uint256 accruedInterestABefore = getAccrueBorrowInterest(user);
 
         // repay interestAmount
         vm.startPrank(user);
@@ -458,15 +458,15 @@ contract LendingPoolTest is Test {
     }
 
     // ==================== WithDraw ====================
-    function testWithdraw_revert_ZeroAmount() public {
+    function testWithdraw_revert_ZeroAmount() public deposit {
         uint256 withDrawAmount = 0;
         vm.expectRevert(LendingPool.LendingPool__ZeroAmount.selector);
         vm.prank(user);
         pool.withdraw(withDrawAmount);
     }
 
-    function testWithdraw_revert_InsufficientCollateral() public {
-        uint256 withDrawAmount = 100;
+    function testWithdraw_revert_InsufficientCollateral() public deposit {
+        uint256 withDrawAmount = 1000;
         vm.expectRevert(LendingPool.LendingPool__InsufficientCollateral.selector);
         vm.prank(user);
         pool.withdraw(withDrawAmount);
@@ -532,6 +532,28 @@ contract LendingPoolTest is Test {
         assertEq(mockToken.balanceOf(user), AMOUNT);
     }
 
+    function test_withDraw_withSupplyRate_withNoDebt() public deposit {
+        uint256 withdrawAmount = 400;
+
+        vm.warp(300 days);
+
+        uint256 amountToWithDraw = getAccrueDepositInterest(user);
+        uint256 deposited = pool.getUserDeposit(user);
+        uint256 rate = pool.interestModel().getSupplyRate(pool.getTotalDeposits(),pool.getTotalBorrows());
+
+        vm.prank(user);
+        pool.withdraw(withdrawAmount);
+
+        uint256 depositRate = pool.getUserAccruedDepositInterest(user);
+
+        assertEq(depositRate,rate);
+        assertEq(amountToWithDraw,deposited + 61);
+    }
+
+    function test_withDraw_withSupplyRate_withDebt() public deposit {
+        vm.warp(300 days);
+    }
+
     function testFuzz_WithdrawAnyAmount_withNoDebt(uint256 amount) public deposit {
         uint256 maxWithDraw = pool.getUserDeposit(user);
         uint256 withdrawAmount = bound(amount, 1, maxWithDraw);
@@ -563,11 +585,22 @@ contract LendingPoolTest is Test {
     }
 
     // ================ Helper Functions ===============
-    function getAccrueInterest(address _user) public view returns (uint256) {
+    function getAccrueBorrowInterest(address _user) public view returns (uint256) {
         uint256 elapsed = block.timestamp - pool.getUserLastInterestUpdate(_user);
 
         uint256 interest = (pool.getUserBorrowed(_user) * pool.getUserBorrowRate(_user) * elapsed) / (1e18 * 365 days);
 
         return interest;
+    }
+
+    function getAccrueDepositInterest(address _user) public view returns (uint256) {
+        uint256 supplyRate = pool.interestModel().getSupplyRate(pool.getTotalDeposits(), pool.getTotalDeposits());
+        uint256 elapsed = block.timestamp - pool.getUserLastDepositUpdate(_user);
+        uint256 userDeposit = pool.getUserDeposit(_user);
+        uint256 interest = (userDeposit * supplyRate * elapsed) / (1e18 * 365 days);
+
+        uint256 amountToWithDraw = userDeposit + interest;
+
+        return amountToWithDraw;
     }
 }

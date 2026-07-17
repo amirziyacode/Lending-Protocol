@@ -14,7 +14,7 @@ contract InterestModel is IInterestRateModel {
     uint256 public constant HIGH_RATE = 15e16; // 15%
     uint256 private constant PRECISION = 1e18;
 
-    function getBorrowRate(uint256 totalDeposits, uint256 totalBorrows) external pure override returns (uint256) {
+    function getBorrowRate(uint256 totalDeposits, uint256 totalBorrows) public pure override returns (uint256) {
         if (totalDeposits == 0) return 0;
 
         uint256 utilization = (totalBorrows * PRECISION) / totalDeposits;
@@ -24,5 +24,13 @@ contract InterestModel is IInterestRateModel {
         }
 
         return HIGH_RATE;
+    }
+
+    function getSupplyRate(uint256 totalDeposits, uint256 totalBorrows) external pure override returns (uint256) {
+        uint256 borrowRate = getBorrowRate(totalDeposits, totalBorrows);
+
+        uint256 utilization = (totalBorrows * PRECISION) / totalDeposits;
+
+        return (borrowRate * utilization) / PRECISION;
     }
 }

@@ -27,8 +27,10 @@ contract LendingPool {
     struct UserPosition {
         uint256 deposited;
         uint256 borrowed;
-        uint256 lastInterestUpdate;
-        uint256 accruedInterest;
+        uint256 lastBorrowUpdate;
+        uint256 lastDepositUpdate;
+        uint256 accruedDepositInterest;
+        uint256 accruedBorrowInterest;
     }
 
     // ==================== State Variables ====================
@@ -83,6 +85,7 @@ contract LendingPool {
 
         token.safeTransferFrom(msg.sender, address(this), amount);
 
+        positions[msg.sender].lastDepositUpdate = block.timestamp;
         positions[msg.sender].deposited += amount;
         totalDeposits += amount;
 
@@ -117,7 +120,7 @@ contract LendingPool {
         totalBorrows += amount;
         uint256 rate = interestModel.getBorrowRate(totalDeposits, totalBorrows);
 
-        positions[msg.sender].lastInterestUpdate = block.timestamp;
+        positions[msg.sender].lastBorrowUpdate = block.timestamp;
         userBorrowRate[msg.sender] = rate;
         token.safeTransfer(msg.sender, amount);
 
@@ -135,8 +138,8 @@ contract LendingPool {
         }
 
         uint256 repayAmount = amount;
-        _accrueInterest(msg.sender);
-        uint256 debt = positions[msg.sender].borrowed + positions[msg.sender].accruedInterest;
+        _accrueBorrowInterest(msg.sender);
+        uint256 debt = positions[msg.sender].borrowed + positions[msg.sender].accruedBorrowInterest;
 
         if (amount > debt) {
             revert LendingPool__RepayTooMuch();
@@ -144,15 +147,15 @@ contract LendingPool {
 
         token.safeTransferFrom(msg.sender, address(this), amount);
 
-        if (amount >= positions[msg.sender].accruedInterest) {
-            amount -= positions[msg.sender].accruedInterest;
-            positions[msg.sender].accruedInterest = 0;
+        if (amount >= positions[msg.sender].accruedBorrowInterest) {
+            amount -= positions[msg.sender].accruedBorrowInterest;
+            positions[msg.sender].accruedBorrowInterest = 0;
             positions[msg.sender].borrowed -= amount;
         } else {
-            positions[msg.sender].accruedInterest -= amount;
+            positions[msg.sender].accruedBorrowInterest -= amount;
         }
 
-        positions[msg.sender].lastInterestUpdate = block.timestamp;
+        positions[msg.sender].lastBorrowUpdate = block.timestamp;
 
         emit Repay(msg.sender, repayAmount);
     }
@@ -167,23 +170,36 @@ contract LendingPool {
             revert LendingPool__ZeroAmount();
         }
 
-        if (amount > positions[msg.sender].deposited) {
+        _accrueWithdrawInterest(msg.sender);
+        uint256 amountSender = amount;
+        uint256 principal = positions[msg.sender].deposited;
+        uint256 interest = positions[msg.sender].accruedDepositInterest;
+        uint256 totalBalance = principal + interest;
+
+        if (amount > totalBalance) {
             revert LendingPool__InsufficientCollateral();
         }
 
-        positions[msg.sender].deposited -= amount;
+        if (totalBalance >= positions[msg.sender].accruedDepositInterest) {
+            amount -= positions[msg.sender].accruedDepositInterest;
+            positions[msg.sender].accruedDepositInterest = 0;
+            positions[msg.sender].deposited -= amount;
+        } else {
+            positions[msg.sender].accruedDepositInterest -= amount;
+        }
 
         if (_healthFactor(msg.sender) < MINIMUM_HEALTH_FACTOR) {
             revert LendingPool__HeathFactorNotOk();
         }
 
-        totalDeposits -= amount;
+        totalDeposits -= amountSender;
+        uint256 remaining = amount - interest;
 
-        receiptToken.burn(msg.sender, amount);
+        receiptToken.burn(msg.sender, remaining);
 
-        token.safeTransfer(msg.sender, amount);
+        token.safeTransfer(msg.sender, amountSender);
 
-        emit Withdrawn(msg.sender, amount);
+        emit Withdrawn(msg.sender, amountSender);
     }
 
     // ==================== Internal Functions ====================
@@ -196,7 +212,7 @@ contract LendingPool {
     function _healthFactor(address _user) internal view returns (uint256) {
         uint256 collateral = positions[_user].deposited;
         uint256 debt = positions[_user].borrowed;
-        uint256 totalDebt = debt + positions[_user].accruedInterest;
+        uint256 totalDebt = debt + positions[_user].accruedBorrowInterest;
 
         if (totalDebt == 0) {
             return type(uint256).max;
@@ -225,14 +241,28 @@ contract LendingPool {
      * @dev Adds the computed interest to `accruedInterest` and updates `lastInterestUpdate`.
      * @param user The address of the borrower.
      */
-    function _accrueInterest(address user) internal {
-        uint256 elapsed = block.timestamp - positions[user].lastInterestUpdate;
+    function _accrueBorrowInterest(address user) internal {
+        uint256 elapsed = block.timestamp - positions[user].lastBorrowUpdate;
 
-        uint256 interest = (positions[user].borrowed * userBorrowRate[user] * elapsed) / (1e18 * 365 days);
+        uint256 interest = (positions[user].borrowed * userBorrowRate[user] * elapsed) / (PRECISION * YEAR);
 
-        positions[user].accruedInterest += interest;
+        positions[user].accruedBorrowInterest += interest;
 
-        positions[user].lastInterestUpdate = block.timestamp;
+        positions[user].lastBorrowUpdate = block.timestamp;
+    }
+
+    /**
+     * @notice Accrues interest on a user's outstanding deposit since the last update.
+     * @dev Adds the computed interest to `accruedInterest` and updates `lastInterestUpdate`.
+     * @param user The address of the borrower.
+     */
+    function _accrueWithdrawInterest(address user) internal {
+        uint256 supplyRate = interestModel.getSupplyRate(totalDeposits, totalBorrows);
+        uint256 elapsed = block.timestamp - positions[user].lastDepositUpdate;
+        uint256 interest = (positions[msg.sender].deposited * supplyRate * elapsed) / (PRECISION * YEAR);
+
+        positions[user].accruedDepositInterest += interest;
+        positions[user].lastDepositUpdate = block.timestamp;
     }
 
     // ==================== Getter Functions ====================
@@ -261,7 +291,16 @@ contract LendingPool {
      * @return The Unix timestamp of the last interest update.
      */
     function getUserLastInterestUpdate(address user) external view returns (uint256) {
-        return positions[user].lastInterestUpdate;
+        return positions[user].lastBorrowUpdate;
+    }
+
+    /**
+     * @notice Returns the timestamp of the user's last interest accrual update.
+     * @param user The address of the user.
+     * @return The Unix timestamp of the last interest update.
+     */
+    function getUserLastDepositUpdate(address user) external view returns (uint256) {
+        return positions[user].lastDepositUpdate;
     }
 
     /**
@@ -270,7 +309,16 @@ contract LendingPool {
      * @return The accrued interest amount.
      */
     function getUserAccruedInterest(address user) external view returns (uint256) {
-        return positions[user].accruedInterest;
+        return positions[user].accruedBorrowInterest;
+    }
+
+    /**
+     * @notice Returns the interest accrued on a user's deposit that has not yet been repaid.
+     * @param user The address of the user.
+     * @return The accrued interest amount.
+     */
+    function getUserAccruedDepositInterest(address user) external view returns (uint256) {
+        return positions[user].accruedDepositInterest;
     }
 
     /**
@@ -322,11 +370,11 @@ contract LendingPool {
      * @return The total debt amount.
      */
     function getDebt(address user) external view returns (uint256) {
-        uint256 elapsed = block.timestamp - positions[user].lastInterestUpdate;
+        uint256 elapsed = block.timestamp - positions[user].lastBorrowUpdate;
         uint256 rate = userBorrowRate[user];
 
         uint256 interest = (positions[user].borrowed * rate * elapsed) / (1e18 * YEAR);
 
-        return positions[user].borrowed + positions[user].accruedInterest + interest;
+        return positions[user].borrowed + positions[user].accruedBorrowInterest + interest;
     }
 }
