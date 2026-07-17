@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: SEE LICENSE IN LICENSE
+pragma solidity 0.8.30;
+
+interface IInterestRateModel {
+    function getBorrowRate(uint256 totalDeposits, uint256 totalBorrows) external view returns (uint256);
+}

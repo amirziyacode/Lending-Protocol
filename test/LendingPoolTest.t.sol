@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity 0.8.30;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, console2} from "forge-std/Test.sol";
 import {LendingPool} from "src/LendingPool.sol";
 import {MockReceiptToken} from "./Mock/MockReceiptToken.sol";
 
 contract LendingPoolTest is Test {
-    address owner = makeAddr("owner");
-    address user = makeAddr("user");
+    address private owner = makeAddr("owner");
+    address private user = makeAddr("user");
 
-    LendingPool pool;
+    LendingPool private pool;
 
     address private constant SEPOLIA_NETWORK = 0x694AA1769357215DE4FAC081bf1f309aDC325306;
 
     uint256 private constant MINIMUM_HEALTH_FACTOR = 1e18;
 
-    MockReceiptToken mockToken;
+    MockReceiptToken private mockToken;
 
     uint256 private constant AMOUNT = 1000;
 
@@ -36,7 +36,7 @@ contract LendingPoolTest is Test {
         assertEq(mockToken.balanceOf(user), AMOUNT);
     }
 
-    modifier deposite() {
+    modifier deposit() {
         uint256 amount = 500;
 
         vm.startPrank(user);
@@ -74,12 +74,12 @@ contract LendingPoolTest is Test {
 
         vm.stopPrank();
 
-        uint256 getDeposite = pool.getUserDeposite(user);
+        uint256 getDeposit = pool.getUserDeposit(user);
         uint256 getTotalDeposits = pool.getTotalDeposits();
         uint256 poolBalanceAfter = mockToken.balanceOf(address(pool)); // 500 token
         uint256 userBalanceAfter = mockToken.balanceOf(user); // 500 token
 
-        assertEq(getDeposite, amount);
+        assertEq(getDeposit, amount);
         assertEq(getTotalDeposits, amount);
         assertEq(pool.receiptToken().balanceOf(user), amount);
         assertEq(poolBalanceAfter, poolBalanceBefore + amount);
@@ -122,16 +122,16 @@ contract LendingPoolTest is Test {
 
         vm.stopPrank();
 
-        uint256 getUserDeposited = pool.getUserDeposite(user);
-        uint256 getPersonDeposite = pool.getUserDeposite(person);
-        uint256 getTotalDepostie = pool.getTotalDeposits();
+        uint256 getUserDeposited = pool.getUserDeposit(user);
+        uint256 getPersonDeposit = pool.getUserDeposit(person);
+        uint256 getTotalDepostit = pool.getTotalDeposits();
         uint256 poolBalanceAfter = mockToken.balanceOf(address(pool)); // 1000 token
         uint256 userBalanceAfter = mockToken.balanceOf(user); // 500 token
         uint256 personBalanceAfter = mockToken.balanceOf(person);
 
         assertEq(getUserDeposited, userAmount);
-        assertEq(getPersonDeposite, personAmount);
-        assertEq(getTotalDepostie, getUserDeposited + getPersonDeposite);
+        assertEq(getPersonDeposit, personAmount);
+        assertEq(getTotalDepostit, getUserDeposited + getPersonDeposit);
         assertEq(pool.receiptToken().balanceOf(user), userAmount);
         assertEq(pool.receiptToken().balanceOf(person), personAmount);
         assertEq(poolBalanceAfter, poolBalanceBefore + userAmount + personAmount);
@@ -156,12 +156,12 @@ contract LendingPoolTest is Test {
 
         vm.stopPrank();
 
-        uint256 getDeposite = pool.getUserDeposite(user);
-        uint256 getTotalDeposits = pool.getTotalDeposits();
+        uint256 getDeposit = pool.getUserDeposit(user);
+        uint256 getTotalDeposits = pool.getUserDeposit(user);
         uint256 poolBalanceAfter = mockToken.balanceOf(address(pool)); // 500 token
         uint256 userBalanceAfter = mockToken.balanceOf(user); // 500 token
 
-        assertEq(getDeposite, amount);
+        assertEq(getDeposit, amount);
         assertEq(getTotalDeposits, amount);
         assertEq(pool.receiptToken().balanceOf(user), amount);
         assertEq(poolBalanceAfter, poolBalanceBefore + amount);
@@ -170,9 +170,10 @@ contract LendingPoolTest is Test {
 
     // ==================== Borrow ====================
     function testBorrow_revert_ZeroAmount() public {
+        uint256 borrowAmount = 0;
         vm.expectRevert(LendingPool.LendingPool__ZeroAmount.selector);
         vm.prank(user);
-        pool.borrow(0);
+        pool.borrow(borrowAmount);
     }
 
     function testBorrow_revert_MaxBorrow() public {
@@ -196,7 +197,7 @@ contract LendingPoolTest is Test {
         pool.borrow(300);
     }
 
-    function testBorrow_revert_NotOkhealthFactor() public deposite {
+    function testBorrow_revert_NotOkhealthFactor() public deposit {
         uint256 borrowAmount = 400;
 
         vm.expectRevert(LendingPool.LendingPool__HeathFactorNotOk.selector);
@@ -204,7 +205,7 @@ contract LendingPoolTest is Test {
         pool.borrow(borrowAmount);
     }
 
-    function testBorrow() public deposite {
+    function testBorrow() public deposit {
         uint256 borrowAmount = 300;
         uint256 balancePoolBefore = mockToken.balanceOf(address(pool)); // 500 token
         uint256 balanceUserBefore = mockToken.balanceOf(user); // 500 token
@@ -215,12 +216,41 @@ contract LendingPoolTest is Test {
         pool.borrow(borrowAmount);
 
         uint256 getBorrowed = pool.getUserBorrowed(user);
+        uint256 totalBorrowed = pool.getTotalBorrows();
         uint256 balancePoolAfter = mockToken.balanceOf(address(pool)); // 200 token
         uint256 balanceUserAfter = mockToken.balanceOf(user); // 800 token
 
         assertEq(getBorrowed, borrowAmount);
+        assertEq(totalBorrowed, borrowAmount);
         assertEq(balancePoolAfter, balancePoolBefore - borrowAmount);
         assertEq(balanceUserAfter, balanceUserBefore + borrowAmount);
+    }
+
+    function testBorrow_withInterestRate() public deposit {
+        uint256 borrowAmount = 300;
+        uint256 low_rate = 5e16; // 5%
+
+        vm.expectEmit(true, false, false, true);
+        emit LendingPool.Borrow(user, borrowAmount);
+        vm.prank(user);
+        pool.borrow(borrowAmount);
+
+        vm.warp(300 days);
+
+        uint256 totalDeposits = pool.getTotalDeposits();
+        uint256 totalBorrows = pool.getTotalBorrows();
+        uint256 interestRate = pool.interestModel().getBorrowRate(totalDeposits, totalBorrows);
+        uint256 borrowRate = pool.getUserBorrowRate(user);
+        uint256 totalDebt = pool.getDebt(user);
+        uint256 interestAmount = 12;
+
+        uint256 userRate = pool.getUserBorrowRate(user);
+
+        assertEq(pool.getTotalBorrows(), borrowAmount);
+        assertEq(userRate, interestRate);
+        assertEq(interestRate, low_rate);
+        assertEq(totalDebt, borrowAmount + interestAmount);
+        assertEq(borrowRate, low_rate);
     }
 
     /**
@@ -228,7 +258,7 @@ contract LendingPoolTest is Test {
      * @param borrowAmount value to borrowed
      * @notice maxBorrowed is limited from healthFacotr
      */
-    function testFuzz_Borrow_withAnyAmount(uint256 borrowAmount) public deposite {
+    function testFuzz_Borrow_withAnyAmount(uint256 borrowAmount) public deposit {
         uint256 maxBorrowed = 375;
         vm.assume(borrowAmount > 0 && borrowAmount < maxBorrowed);
         uint256 balancePoolBefore = mockToken.balanceOf(address(pool)); // 500 token
@@ -240,10 +270,12 @@ contract LendingPoolTest is Test {
         pool.borrow(borrowAmount);
 
         uint256 getBorrowed = pool.getUserBorrowed(user);
+        uint256 totalBorrowed = pool.getTotalBorrows();
         uint256 balancePoolAfter = mockToken.balanceOf(address(pool)); // 200 token
         uint256 balanceUserAfter = mockToken.balanceOf(user); // 800 token
 
         assertEq(getBorrowed, borrowAmount);
+        assertEq(totalBorrowed, borrowAmount);
         assertEq(balancePoolAfter, balancePoolBefore - borrowAmount);
         assertEq(balanceUserAfter, balanceUserBefore + borrowAmount);
     }
@@ -257,7 +289,7 @@ contract LendingPoolTest is Test {
         pool.repay(repayAmount);
     }
 
-    function testRepay_revert_RepayTooMuch() public deposite {
+    function testRepay_revert_RepayTooMuch() public deposit {
         uint256 borrowAmount = 300;
         vm.prank(user);
         pool.borrow(borrowAmount);
@@ -269,7 +301,7 @@ contract LendingPoolTest is Test {
         pool.repay(repayAmount);
     }
 
-    function testRepay() public deposite {
+    function testRepay() public deposit {
         uint256 borrowAmount = 300;
         vm.prank(user);
         pool.borrow(borrowAmount);
@@ -300,7 +332,35 @@ contract LendingPoolTest is Test {
         assertEq(userBalanceAfter, userBalanceBefore - repayAmount);
     }
 
-    function testFuzz_RepayWithAnyAmount(uint256 amount) public deposite {
+    function testRepay_accruedInterest() public deposit {
+        uint256 borrowAmount = 300;
+        vm.prank(user);
+        pool.borrow(300);
+
+        vm.warp(300 days);
+
+        uint256 interestAmount = 12;
+        uint256 accruedInterestABefore = getAccrueInterest(user);
+
+        // repay interestAmount
+        vm.startPrank(user);
+
+        mockToken.approve(address(pool), interestAmount);
+
+        vm.expectEmit(true, false, false, true);
+        emit LendingPool.Repay(user, interestAmount);
+
+        pool.repay(interestAmount);
+
+        vm.stopPrank();
+        uint256 accruedInterestAfter = pool.getUserAccruedInterest(user);
+        uint256 getBorrowed = pool.getUserBorrowed(user);
+
+        assertEq(getBorrowed, borrowAmount);
+        assertEq(accruedInterestAfter, accruedInterestABefore - interestAmount);
+    }
+
+    function testFuzz_RepayWithAnyAmount(uint256 amount) public deposit {
         uint256 borrowAmount = 300;
         uint256 repayAmount = bound(amount, 1, borrowAmount);
 
@@ -346,7 +406,7 @@ contract LendingPoolTest is Test {
         pool.withdraw(withDrawAmount);
     }
 
-    function testWithdraw_revert_HeathFactorNotOk() public deposite {
+    function testWithdraw_revert_HeathFactorNotOk() public deposit {
         uint256 withdrawAmount = 400;
 
         vm.prank(user);
@@ -357,7 +417,7 @@ contract LendingPoolTest is Test {
         pool.withdraw(withdrawAmount);
     }
 
-    function testWithdraw_NotDebt_OkhealthFactor() public deposite {
+    function testWithdraw_NotDebt_OkhealthFactor() public deposit {
         uint256 withdrawAmount = 400;
 
         vm.prank(user);
@@ -366,9 +426,9 @@ contract LendingPoolTest is Test {
         assertTrue(pool.getHealthFactor(user) > MINIMUM_HEALTH_FACTOR);
     }
 
-    function testWithdraw_NotDebt() public deposite {
+    function testWithdraw_NotDebt() public deposit {
         uint256 withdrawAmount = 400;
-        uint256 getUserDeposited = pool.getUserDeposite(user);
+        uint256 getUserDeposited = pool.getUserDeposit(user);
         uint256 poolBalanceBefore = mockToken.balanceOf(address(pool));
         uint256 userBalanceBefore = mockToken.balanceOf(user);
 
@@ -388,7 +448,7 @@ contract LendingPoolTest is Test {
         assertEq(userBalanceAfter, userBalanceBefore + withdrawAmount);
     }
 
-    function test_RevertWhen_WithdrawBreaksHealthFactor() public deposite {
+    function test_RevertWhen_WithdrawBreaksHealthFactor() public deposit {
         uint256 withdrawAmount = 101;
 
         vm.prank(user);
@@ -399,18 +459,18 @@ contract LendingPoolTest is Test {
         pool.withdraw(withdrawAmount);
     }
 
-    function test_WithdrawUnlimited_WhenNoDebtEverTaken() public deposite {
+    function test_WithdrawUnlimited_WhenNoDebtEverTaken() public deposit {
         vm.prank(user);
         pool.withdraw(500);
 
         assertEq(mockToken.balanceOf(user), AMOUNT);
     }
 
-    function testFuzz_WithdrawAnyAmount_withNoDebt(uint256 amount) public deposite {
-        uint256 maxWithDraw = pool.getUserDeposite(user);
+    function testFuzz_WithdrawAnyAmount_withNoDebt(uint256 amount) public deposit {
+        uint256 maxWithDraw = pool.getUserDeposit(user);
         uint256 withdrawAmount = bound(amount, 1, maxWithDraw);
 
-        uint256 getUserDeposited = pool.getUserDeposite(user);
+        uint256 getUserDeposited = pool.getUserDeposit(user);
         uint256 poolBalanceBefore = mockToken.balanceOf(address(pool));
         uint256 userBalanceBefore = mockToken.balanceOf(user);
 
@@ -434,5 +494,14 @@ contract LendingPoolTest is Test {
     function test_getLTV() public view {
         uint256 LTV = 80;
         assertEq(pool.getLTV(), LTV);
+    }
+
+    // ================ Helper Functions ===============
+    function getAccrueInterest(address _user) public view returns (uint256) {
+        uint256 elapsed = block.timestamp - pool.getUserLastInterestUpdate(_user);
+
+        uint256 interest = (pool.getUserBorrowed(_user) * pool.getUserBorrowRate(_user) * elapsed) / (1e18 * 365 days);
+
+        return interest;
     }
 }

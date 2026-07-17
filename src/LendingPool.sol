@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity 0.8.30;
 
+import {InterestModel} from "./InterestModel.sol";
+import {IInterestRateModel} from "./intefercafes/IInterestRateModel.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/interfaces/IERC20.sol";
 import {ReceiptToken} from "src/ReceiptToken.sol";
 import {PriceOracle} from "src/PriceOracle.sol";
@@ -26,21 +28,24 @@ contract LendingPool {
         uint256 deposited;
         uint256 borrowed;
         uint256 lastInterestUpdate;
+        uint256 accruedInterest;
     }
 
     // ==================== State Variables ====================
     IERC20 public token;
     ReceiptToken public receiptToken;
-    PriceOracle private oracle;
+    PriceOracle public oracle;
+    IInterestRateModel public interestModel;
 
     mapping(address => UserPosition) private positions;
+    mapping(address => uint256) private userBorrowRate;
 
     uint256 public totalDeposits;
 
     uint256 public totalBorrows;
 
     uint256 private constant MINIMUM_HEALTH_FACTOR = 1e18;
-
+    uint256 private constant YEAR = 365 days;
     uint256 constant PRECISION = 1e18;
 
     uint256 private constant LTV = 80; // LTV = 80 %
@@ -64,6 +69,7 @@ contract LendingPool {
         token = IERC20(_token);
         receiptToken = new ReceiptToken();
         oracle = new PriceOracle(price_feed);
+        interestModel = new InterestModel();
     }
 
     /**
@@ -86,6 +92,8 @@ contract LendingPool {
     }
 
     function borrow(uint256 amount) external {
+        uint256 rate = interestModel.getBorrowRate(totalDeposits, totalBorrows);
+
         if (amount == 0) {
             revert LendingPool__ZeroAmount();
         }
@@ -104,6 +112,9 @@ contract LendingPool {
             revert LendingPool__HeathFactorNotOk();
         }
 
+        totalBorrows += amount;
+        positions[msg.sender].lastInterestUpdate = block.timestamp;
+        userBorrowRate[msg.sender] = rate;
         token.safeTransfer(msg.sender, amount);
 
         emit Borrow(msg.sender, amount);
@@ -114,15 +125,27 @@ contract LendingPool {
             revert LendingPool__ZeroAmount();
         }
 
-        if (amount > positions[msg.sender].borrowed) {
+        uint256 repayAmount = amount;
+        _accrueInterest(msg.sender);
+        uint256 debt = positions[msg.sender].borrowed + positions[msg.sender].accruedInterest;
+
+        if (amount > debt) {
             revert LendingPool__RepayTooMuch();
         }
 
         token.safeTransferFrom(msg.sender, address(this), amount);
 
-        positions[msg.sender].borrowed -= amount;
+        if (amount >= positions[msg.sender].accruedInterest) {
+            amount -= positions[msg.sender].accruedInterest;
+            positions[msg.sender].accruedInterest = 0;
+            positions[msg.sender].borrowed -= amount;
+        } else {
+            positions[msg.sender].accruedInterest -= amount;
+        }
 
-        emit Repay(msg.sender, amount);
+        positions[msg.sender].lastInterestUpdate = block.timestamp;
+
+        emit Repay(msg.sender, repayAmount);
     }
 
     function withdraw(uint256 amount) external {
@@ -170,9 +193,19 @@ contract LendingPool {
         return (currentDebt + borrowAmount) <= borrowLimit;
     }
 
+    function _accrueInterest(address user) internal {
+        uint256 elapsed = block.timestamp - positions[user].lastInterestUpdate;
+
+        uint256 interest = (positions[user].borrowed * userBorrowRate[user] * elapsed) / (1e18 * 365 days);
+
+        positions[user].accruedInterest += interest;
+
+        positions[user].lastInterestUpdate = block.timestamp;
+    }
+
     // ==================== Getter Functions ====================
 
-    function getUserDeposite(address user) external view returns (uint256) {
+    function getUserDeposit(address user) external view returns (uint256) {
         return positions[user].deposited;
     }
 
@@ -180,15 +213,40 @@ contract LendingPool {
         return positions[user].borrowed;
     }
 
+    function getUserLastInterestUpdate(address user) external view returns (uint256) {
+        return positions[user].lastInterestUpdate;
+    }
+
+    function getUserAccruedInterest(address user) external view returns (uint256) {
+        return positions[user].accruedInterest;
+    }
+
     function getTotalDeposits() external view returns (uint256) {
         return totalDeposits;
+    }
+
+    function getTotalBorrows() external view returns (uint256) {
+        return totalBorrows;
     }
 
     function getLTV() external pure returns (uint256) {
         return LTV;
     }
 
+    function getUserBorrowRate(address _user) external view returns (uint256) {
+        return userBorrowRate[_user];
+    }
+
     function getHealthFactor(address _user) external view returns (uint256) {
         return _healthFactor(_user);
+    }
+
+    function getDebt(address user) external view returns (uint256) {
+        uint256 elapsed = block.timestamp - positions[user].lastInterestUpdate;
+        uint256 rate = userBorrowRate[user];
+
+        uint256 interest = (positions[user].borrowed * rate * elapsed) / (1e18 * YEAR);
+
+        return positions[user].borrowed + positions[user].accruedInterest + interest;
     }
 }
