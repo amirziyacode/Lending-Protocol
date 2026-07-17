@@ -226,7 +226,7 @@ contract LendingPoolTest is Test {
         assertEq(balanceUserAfter, balanceUserBefore + borrowAmount);
     }
 
-    function testBorrow_withInterestRate() public deposit {
+    function testBorrow_with_LowInterestRate() public deposit {
         uint256 borrowAmount = 300;
         uint256 low_rate = 5e16; // 5%
 
@@ -253,10 +253,48 @@ contract LendingPoolTest is Test {
         assertEq(borrowRate, low_rate);
     }
 
+    function testBorrow_with_MaxInterestRate() public deposit {
+        address bob = makeAddr("bob");
+        uint256 bobAmount = 500;
+        uint256 highRate = 15e16;
+        uint256 lowRate = 5e16;
+
+        // mint and deposit Token
+        vm.prank(owner);
+        mockToken.mint(bob, AMOUNT);
+
+        vm.startPrank(bob);
+
+        mockToken.approve(address(pool), bobAmount);
+        pool.depositCollateral(bobAmount);
+
+        vm.stopPrank();
+
+        uint256 borrowAmount = 355;
+        vm.prank(user);
+        pool.borrow(borrowAmount);
+
+        vm.prank(bob);
+        pool.borrow(borrowAmount);
+
+        console2.log(pool.getUserBorrowRate(bob));
+
+        uint256 totalDeposits = pool.getTotalDeposits();
+        uint256 totalBorrows = pool.getTotalBorrows();
+        uint256 interestRate = pool.interestModel().getBorrowRate(totalDeposits, totalBorrows);
+        uint256 userBorrowRate = pool.getUserBorrowRate(user);
+        uint256 bobBorrowRate = pool.getUserBorrowRate(bob);
+
+        assertEq(interestRate, highRate);
+        assertEq(userBorrowRate, lowRate);
+        assertEq(bobBorrowRate, highRate);
+        assertEq(pool.getTotalBorrows(), borrowAmount + borrowAmount);
+    }
+
     /**
      *
      * @param borrowAmount value to borrowed
-     * @notice maxBorrowed is limited from healthFacotr
+     * @notice maxBorrowed is limited from healthFactor
      */
     function testFuzz_Borrow_withAnyAmount(uint256 borrowAmount) public deposit {
         uint256 maxBorrowed = 375;
@@ -358,6 +396,34 @@ contract LendingPoolTest is Test {
 
         assertEq(getBorrowed, borrowAmount);
         assertEq(accruedInterestAfter, accruedInterestABefore - interestAmount);
+    }
+
+    function testRepay_Just_repayAmount() public deposit {
+        uint256 borrowAmount = 300;
+        vm.prank(user);
+        pool.borrow(300);
+
+        vm.warp(300 days);
+
+        uint256 repayAmount = 10;
+        uint256 accruedInterestABefore = getAccrueInterest(user);
+
+        // repay interestAmount
+        vm.startPrank(user);
+
+        mockToken.approve(address(pool), repayAmount);
+
+        vm.expectEmit(true, false, false, true);
+        emit LendingPool.Repay(user, repayAmount);
+
+        pool.repay(repayAmount);
+
+        vm.stopPrank();
+        uint256 accruedInterestAfter = pool.getUserAccruedInterest(user);
+        uint256 getBorrowed = pool.getUserBorrowed(user);
+
+        assertEq(getBorrowed, borrowAmount);
+        assertEq(accruedInterestAfter, accruedInterestABefore - repayAmount);
     }
 
     function testFuzz_RepayWithAnyAmount(uint256 amount) public deposit {

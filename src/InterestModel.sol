@@ -9,7 +9,7 @@ import {IInterestRateModel} from "./intefercafes/IInterestRateModel.sol";
  * @notice   Calculate Rate for price feed in ChinLinkOracle
  */
 contract InterestModel is IInterestRateModel {
-    uint256 public constant OPTIMAL_UTILIZATION = 80e16; // 80%
+    uint256 public constant OPTIMAL_UTILIZATION = 70e16; // 70%
     uint256 public constant LOW_RATE = 5e16; // 5%
     uint256 public constant HIGH_RATE = 15e16; // 15%
     uint256 private constant PRECISION = 1e18;

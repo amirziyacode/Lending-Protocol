@@ -11,7 +11,7 @@ import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/Safe
 /**
  * @title LendingProtocol
  * @author AmirAli
- * @notice it just for learing !!
+ * @notice A simple collateralized lending pool for learning purposes.
  */
 contract LendingPool {
     using SafeERC20 for IERC20;
@@ -40,9 +40,8 @@ contract LendingPool {
     mapping(address => UserPosition) private positions;
     mapping(address => uint256) private userBorrowRate;
 
-    uint256 public totalDeposits;
-
-    uint256 public totalBorrows;
+    uint256 private totalDeposits;
+    uint256 private totalBorrows;
 
     uint256 private constant MINIMUM_HEALTH_FACTOR = 1e18;
     uint256 private constant YEAR = 365 days;
@@ -62,8 +61,9 @@ contract LendingPool {
     // ==================== External Functions ====================
 
     /**
-     *
-     * @param price_feed is for network we want to get ETH price from offchain like sepolia
+     * @notice Deploys the lending pool and its dependent contracts.
+     * @param _token The ERC20 token used as collateral and liquidity.
+     * @param price_feed The Chainlink price feed address for the collateral asset.
      */
     constructor(address _token, address price_feed) {
         token = IERC20(_token);
@@ -73,8 +73,8 @@ contract LendingPool {
     }
 
     /**
-     *
-     * @param amount ETH value send it
+     * @notice Deposits collateral into the pool and mints receipt tokens to the sender.
+     * @param amount The amount of tokens to deposit.
      */
     function depositCollateral(uint256 amount) external {
         if (amount == 0) {
@@ -91,9 +91,12 @@ contract LendingPool {
         emit Deposited(msg.sender, amount);
     }
 
+    /**
+     * @notice Borrows tokens from the pool against deposited collateral.
+     * @dev Updates the borrow rate, accrual timestamp, and total borrows before transferring funds.
+     * @param amount The amount of tokens to borrow.
+     */
     function borrow(uint256 amount) external {
-        uint256 rate = interestModel.getBorrowRate(totalDeposits, totalBorrows);
-
         if (amount == 0) {
             revert LendingPool__ZeroAmount();
         }
@@ -111,8 +114,9 @@ contract LendingPool {
         if (_healthFactor(msg.sender) < MINIMUM_HEALTH_FACTOR) {
             revert LendingPool__HeathFactorNotOk();
         }
-
         totalBorrows += amount;
+        uint256 rate = interestModel.getBorrowRate(totalDeposits, totalBorrows);
+
         positions[msg.sender].lastInterestUpdate = block.timestamp;
         userBorrowRate[msg.sender] = rate;
         token.safeTransfer(msg.sender, amount);
@@ -120,6 +124,11 @@ contract LendingPool {
         emit Borrow(msg.sender, amount);
     }
 
+    /**
+     * @notice Repays outstanding debt, applying payment to accrued interest first.
+     * @dev Accrues pending interest before validating the repayment amount.
+     * @param amount The amount of tokens to repay.
+     */
     function repay(uint256 amount) external {
         if (amount == 0) {
             revert LendingPool__ZeroAmount();
@@ -148,6 +157,11 @@ contract LendingPool {
         emit Repay(msg.sender, repayAmount);
     }
 
+    /**
+     * @notice Withdraws deposited collateral and burns the corresponding receipt tokens.
+     * @dev Reverts if the withdrawal would leave the user's health factor below the minimum.
+     * @param amount The amount of collateral to withdraw.
+     */
     function withdraw(uint256 amount) external {
         if (amount == 0) {
             revert LendingPool__ZeroAmount();
@@ -173,19 +187,32 @@ contract LendingPool {
     }
 
     // ==================== Internal Functions ====================
+    /**
+     * @notice Calculates the health factor for a user position.
+     * @dev Returns the maximum uint256 value when the user has no debt.
+     * @param _user The address of the user to evaluate.
+     * @return The health factor scaled by `PRECISION` (1e18).
+     */
     function _healthFactor(address _user) internal view returns (uint256) {
         uint256 collateral = positions[_user].deposited;
         uint256 debt = positions[_user].borrowed;
+        uint256 totalDebt = debt + positions[_user].accruedInterest;
 
-        if (debt == 0) {
+        if (totalDebt == 0) {
             return type(uint256).max;
         }
 
         uint256 adjustedCollateral = (collateral * LIQUIDATION_THRESHOLD) / 100;
 
-        return (adjustedCollateral * PRECISION) / debt;
+        return (adjustedCollateral * PRECISION) / totalDebt;
     }
 
+    /**
+     * @notice Checks whether a borrow amount stays within the user's LTV limit.
+     * @param user The address of the borrower.
+     * @param borrowAmount The additional amount the user wants to borrow.
+     * @return True if the borrow is allowed, false otherwise.
+     */
     function _isBorrowAllowed(address user, uint256 borrowAmount) internal view returns (bool) {
         uint256 currentDebt = positions[user].borrowed;
         uint256 borrowLimit = (positions[user].deposited * LTV) / 100;
@@ -193,6 +220,11 @@ contract LendingPool {
         return (currentDebt + borrowAmount) <= borrowLimit;
     }
 
+    /**
+     * @notice Accrues interest on a user's outstanding borrow since the last update.
+     * @dev Adds the computed interest to `accruedInterest` and updates `lastInterestUpdate`.
+     * @param user The address of the borrower.
+     */
     function _accrueInterest(address user) internal {
         uint256 elapsed = block.timestamp - positions[user].lastInterestUpdate;
 
@@ -205,42 +237,90 @@ contract LendingPool {
 
     // ==================== Getter Functions ====================
 
+    /**
+     * @notice Returns the amount of collateral a user has deposited.
+     * @param user The address of the user.
+     * @return The deposited collateral amount.
+     */
     function getUserDeposit(address user) external view returns (uint256) {
         return positions[user].deposited;
     }
 
+    /**
+     * @notice Returns the principal amount a user has borrowed.
+     * @param user The address of the user.
+     * @return The borrowed principal, excluding accrued interest.
+     */
     function getUserBorrowed(address user) external view returns (uint256) {
         return positions[user].borrowed;
     }
 
+    /**
+     * @notice Returns the timestamp of the user's last interest accrual update.
+     * @param user The address of the user.
+     * @return The Unix timestamp of the last interest update.
+     */
     function getUserLastInterestUpdate(address user) external view returns (uint256) {
         return positions[user].lastInterestUpdate;
     }
 
+    /**
+     * @notice Returns the interest accrued on a user's borrow that has not yet been repaid.
+     * @param user The address of the user.
+     * @return The accrued interest amount.
+     */
     function getUserAccruedInterest(address user) external view returns (uint256) {
         return positions[user].accruedInterest;
     }
 
+    /**
+     * @notice Returns the total collateral deposited across all users.
+     * @return The total deposited amount.
+     */
     function getTotalDeposits() external view returns (uint256) {
         return totalDeposits;
     }
 
+    /**
+     * @notice Returns the total principal borrowed across all users.
+     * @return The total borrowed amount.
+     */
     function getTotalBorrows() external view returns (uint256) {
         return totalBorrows;
     }
 
+    /**
+     * @notice Returns the loan-to-value ratio used for borrow limits.
+     * @return The LTV percentage (e.g. 80 for 80%).
+     */
     function getLTV() external pure returns (uint256) {
         return LTV;
     }
 
+    /**
+     * @notice Returns the borrow rate locked in for a user at their last borrow.
+     * @param _user The address of the user.
+     * @return The borrow rate scaled by `PRECISION` (1e18).
+     */
     function getUserBorrowRate(address _user) external view returns (uint256) {
         return userBorrowRate[_user];
     }
 
+    /**
+     * @notice Returns the current health factor for a user.
+     * @param _user The address of the user.
+     * @return The health factor scaled by `PRECISION` (1e18).
+     */
     function getHealthFactor(address _user) external view returns (uint256) {
         return _healthFactor(_user);
     }
 
+    /**
+     * @notice Returns the user's total debt including principal, stored accrued interest, and pending interest.
+     * @dev Computes pending interest from the last update timestamp without modifying state.
+     * @param user The address of the user.
+     * @return The total debt amount.
+     */
     function getDebt(address user) external view returns (uint256) {
         uint256 elapsed = block.timestamp - positions[user].lastInterestUpdate;
         uint256 rate = userBorrowRate[user];
