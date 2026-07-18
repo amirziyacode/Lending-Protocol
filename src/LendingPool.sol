@@ -171,6 +171,7 @@ contract LendingPool {
         }
 
         _accrueWithdrawInterest(msg.sender);
+
         uint256 amountSender = amount;
         uint256 principal = positions[msg.sender].deposited;
         uint256 interest = positions[msg.sender].accruedDepositInterest;
@@ -180,22 +181,22 @@ contract LendingPool {
             revert LendingPool__InsufficientCollateral();
         }
 
-        if (totalBalance >= positions[msg.sender].accruedDepositInterest) {
-            amount -= positions[msg.sender].accruedDepositInterest;
+        if (amount >= interest) {
+            amount -= interest;
             positions[msg.sender].accruedDepositInterest = 0;
             positions[msg.sender].deposited -= amount;
         } else {
             positions[msg.sender].accruedDepositInterest -= amount;
+            amount = 0;
         }
 
         if (_healthFactor(msg.sender) < MINIMUM_HEALTH_FACTOR) {
             revert LendingPool__HeathFactorNotOk();
         }
 
-        totalDeposits -= amountSender;
-        uint256 remaining = amount - interest;
+        receiptToken.burn(msg.sender, amountSender);
 
-        receiptToken.burn(msg.sender, remaining);
+        totalDeposits -= amountSender;
 
         token.safeTransfer(msg.sender, amountSender);
 
